@@ -1,0 +1,8 @@
+vllm                   # Base inference engine
+torch                  # Core ML framework
+transformers           # Model loading
+fastapi                # REST API
+uvicorn[standard]      # ASGI server
+prometheus-client      # Monitoring
+nvidia-cublas-cu12     # CUDA acceleration
+triton                 # Custom kernels

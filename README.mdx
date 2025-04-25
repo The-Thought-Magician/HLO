@@ -1,0 +1,299 @@
+# Healthcare LLM Inference Optimizer (HLO) - Technical Documentation
+
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [Prerequisites](#2-prerequisites)
+3. [Project Setup](#3-project-setup)
+4. [Core Components](#4-core-components)
+5. [Step-by-Step Implementation](#5-step-by-step-implementation)
+6. [API Usage Examples](#6-api-usage-examples)
+7. [Monitoring Setup](#7-monitoring-setup)
+8. [Troubleshooting](#8-troubleshooting)
+9. [References](#9-references)
+
+---
+
+## 1. Project Overview
+
+A simplified LLM system for healthcare queries that:
+
+- Serves a base medical LLM
+- Switches between different disease-specific adapters
+- Provides basic performance monitoring
+- Uses 8-bit quantization for memory efficiency
+
+**Simplified Tech Stack**:
+
+```python
+# requirements.txt
+fastapi>=0.68.0
+uvicorn>=0.15.0
+torch>=2.0.0
+transformers>=4.28.0
+vllm>=0.2.0
+bitsandbytes>=0.41.0
+python-dotenv>=0.19.0
+```
+
+---
+
+## 2. Prerequisites
+
+### 2.1 Hardware Requirements
+
+- CPU: x86-64 (Intel/AMD)
+- RAM: 16GB+
+- GPU: NVIDIA with 8GB+ VRAM (RTX 2070+ recommended)
+
+### 2.2 Software Requirements
+
+- Python 3.9+
+- Git
+- NVIDIA Drivers (Latest version)
+- CUDA Toolkit 11.7+
+
+---
+
+## 3. Project Setup
+
+### 3.1 Repository Structure
+
+```bash
+HLO/
+├── api/               # API endpoints
+│   └── main.py
+├── models/            # Base models
+├── adapters/          # LoRA adapters
+├── config/            # Configuration files
+│   └── settings.py
+├── scripts/           # Utility scripts
+├── .env               # Environment variables
+└── requirements.txt
+```
+
+### 3.2 Initial Setup
+
+```bash
+# Clone repository
+git clone https://github.com/The-Thought-Magician/HLO.git
+cd HLO
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# .venv\Scripts\activate  # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+---
+
+## 4. Core Components
+
+### 4.1 Base Model (Mistral-7B)
+
+- **Purpose**: General medical knowledge base
+- **Source**: [Hugging Face Model Hub](https://huggingface.co/mistralai/Mistral-7B-v0.1)
+- **Quantization**: 8-bit via bitsandbytes
+
+### 4.2 LoRA Adapters
+
+| Adapter Name | Purpose | Source |
+|--------------|---------|--------|
+| cardiology | Heart disease analysis | [Example Adapter](https://huggingface.co/adapters/cardio-lora) |
+| oncology | Cancer detection | [Example Adapter](https://huggingface.co/adapters/onco-lora) |
+
+### 4.3 Configuration File
+
+```python
+# config/settings.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Settings:
+    MODEL_NAME = "mistral-7B-v0.1"
+    ADAPTER_PATH = os.getenv("ADAPTER_PATH", "./adapters")
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    QUANTIZE = True
+```
+
+---
+
+## 5. Step-by-Step Implementation
+
+### 5.1 Model Setup
+
+```bash
+# Download base model
+python -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('mistralai/Mistral-7B-v0.1', cache_dir='./models')"
+
+# Download sample adapter
+mkdir -p adapters/cardiology
+wget -P adapters/cardiology https://huggingface.co/adapters/cardio-lora/resolve/main/adapter_model.bin
+```
+
+### 5.2 Basic Inference Server
+
+```python
+# api/main.py
+from fastapi import FastAPI
+from vllm import LLM, SamplingParams
+from config.settings import Settings
+
+app = FastAPI()
+settings = Settings()
+
+llm = LLM(
+    model=settings.MODEL_NAME,
+    enable_lora=True,
+    quantization="bitsandbytes" if settings.QUANTIZE else None
+)
+
+@app.post("/generate")
+async def generate_text(prompt: str):
+    sampling_params = SamplingParams(temperature=0.7, max_tokens=256)
+    return llm.generate(prompt, sampling_params)
+```
+
+### 5.3 Starting the Server
+
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## 6. API Usage Examples
+
+### 6.1 Basic Query
+
+```bash
+curl -X POST "http://localhost:8000/generate" \
+-H "Content-Type: application/json" \
+-d '{"prompt":"What are common symptoms of heart disease?"}'
+```
+
+### 6.2 Switching Adapters
+
+```python
+# Add to api/main.py
+from vllm.lora.request import LoRARequest
+
+@app.post("/switch-adapter")
+async def switch_adapter(adapter_name: str):
+    global llm
+    llm = LLM(
+        model=settings.MODEL_NAME,
+        enable_lora=True,
+        lora_request=LoRARequest(adapter_name, 1, f"{settings.ADAPTER_PATH}/{adapter_name}")
+    )
+    return {"status": f"Switched to {adapter_name} adapter"}
+```
+
+---
+
+## 7. Monitoring Setup
+
+### 7.1 Basic Metrics Endpoint
+
+```python
+# Add to api/main.py
+from prometheus_client import make_asgi_app, Counter
+
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
+REQUEST_COUNTER = Counter("hlo_requests", "Total API requests")
+
+# Add to generate endpoint
+@app.post("/generate")
+async def generate_text(prompt: str):
+    REQUEST_COUNTER.inc()
+    # ... existing code ...
+```
+
+### 7.2 Accessing Metrics
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+---
+
+## 8. Troubleshooting
+
+### 8.1 Common Issues
+
+| Symptom | Solution |
+|---------|----------|
+| CUDA Out of Memory | Reduce batch size, enable quantization |
+| Adapter Not Found | Check adapter path in .env file |
+| Slow Responses | Verify GPU utilization with `nvidia-smi` |
+
+### 8.2 Useful Commands
+
+```bash
+# Check GPU status
+nvidia-smi
+
+# View API logs
+tail -f uvicorn.log
+
+# Test quantization
+python -c "import torch; print(torch.cuda.get_device_name(0))"
+```
+
+---
+
+## 9. References
+
+### 9.1 Core Technologies
+
+1. [FastAPI Documentation](https://fastapi.tiangolo.com/)
+2. [vLLM Official Guide](https://vllm.readthedocs.io/)
+3. [Hugging Face Transformers](https://huggingface.co/docs/transformers)
+4. [Bitsandbytes Quantization](https://github.com/TimDettmers/bitsandbytes)
+
+### 9.2 Medical LLM Resources
+
+1. [Mistral-7B Paper](https://arxiv.org/abs/2305.15000)
+2. [LoRA Original Paper](https://arxiv.org/abs/2106.09685)
+3. [Medical Adapter Collection](https://huggingface.co/adapters)
+
+### 9.3 Learning Resources
+
+1. [Python Virtual Environments](https://docs.python.org/3/tutorial/venv.html)
+2. [CUDA Installation Guide](https://developer.nvidia.com/cuda-downloads)
+3. [REST API Basics](https://restfulapi.net/)
+
+---
+
+This documentation provides a complete starting point for new developers to implement a basic healthcare LLM system. All components can be scaled up progressively as skills develop.
+
+Citations:
+[1] <https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/30826882/6f40e32f-cb38-4fd9-a7a5-27ac0b679de6/Chiranjeet-Mishra-AI-Engg.pdf>
+[2] <https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/30826882/39da8956-70e0-4a9f-9820-d9994fbaef4d/README.md>
+[3] <https://pytorch.org/docs/stable/quantization.html>
+[4] <https://docs.vllm.ai/en/v0.8.1/features/lora.html>
+[5] <https://www.youtube.com/watch?v=iWS9ogMPOI0>
+[6] <https://onnxruntime.ai/docs/genai/tutorials/finetune.html>
+[7] <https://pyimagesearch.com/2025/03/17/getting-started-with-python-and-fastapi-a-complete-beginners-guide/>
+[8] <https://huggingface.co/docs/diffusers/en/training/lora>
+[9] <https://fastapi.tiangolo.com/tutorial/>
+[10] <https://www.kdnuggets.com/beginners-guide-to-fastapi>
+[11] <https://github.com/pytorch/pytorch/issues/125129>
+[12] <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>
+[13] <https://github.com/pytorch/ao>
+[14] <https://arxiv.org/html/2401.14112v2>
+[15] <https://news.ycombinator.com/item?id=41703732>
+[16] <https://www.youtube.com/watch?v=Br07GsnnvWc>
+[17] <https://arxiv.org/html/2409.16694>
+[18] <https://www.youtube.com/watch?v=8N9L-XK1eEU>
+[19] <https://www.linkedin.com/posts/fabian-gwinner_optimizing-large-language-model-training-activity-7291592413280665600-LT30>
+[20] <https://www.datacamp.com/tutorial/mastering-low-rank-adaptation-lora-enhancing-large-language-models-for-efficient-adaptation>
+[21] <https://www.datacamp.com/tutorial/introduction-fastapi-tutorial>
+[22] <https://quark.docs.amd.com/release-0.5.0/pytorch/tutorial_mx.html>
