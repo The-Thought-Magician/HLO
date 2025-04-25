@@ -27,13 +27,15 @@ A simplified LLM system for healthcare queries that:
 
 ```python
 # requirements.txt
-fastapi>=0.68.0
-uvicorn>=0.15.0
-torch>=2.0.0
-transformers>=4.28.0
-vllm>=0.2.0
-bitsandbytes>=0.41.0
-python-dotenv>=0.19.0
+vllm                   # Base inference engine
+torch                  # Core ML framework
+transformers           # Model loading
+fastapi                # REST API
+uvicorn[standard]      # ASGI server
+prometheus-client      # Monitoring
+nvidia-cublas-cu12     # CUDA acceleration
+triton                 # Custom kernels
+
 ```
 
 ---
